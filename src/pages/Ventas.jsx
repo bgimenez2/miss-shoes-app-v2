@@ -1,132 +1,180 @@
-import React, { useState } from 'react';
-import { formatNumber } from '../utils/format';
-import { useLocalStorage } from '../utils/useLocalStorage';
-import SearchBar from '../components/SearchBar';
+import React, { useState, useEffect } from 'react';
 
 export default function Ventas() {
-  const [ventas, setVentas] = useLocalStorage('ventas', []);
-  const [search, setSearch] = useState('');
-  const [producto, setProducto] = useState('');
-  const [monto, setMonto] = useState('');
+  const [productos, setProductos] = useState([]);
+  const [ventas, setVentas] = useState(() => {
+    const saved = localStorage.getItem('ms_ventas');
+    return saved ? JSON.parse(saved) : [];
+  });
 
-  // Filtra por producto o ID
-  const filtered = ventas.filter(v =>
-    v.producto.toLowerCase().includes(search.toLowerCase()) ||
-    String(v.id).includes(search)
+  const [buscar, setBuscar] = useState('');
+  const [seleccionados, setSeleccionados] = useState([]);
+  const [total, setTotal] = useState(0);
+
+  // Cargar productos desde localStorage
+  useEffect(() => {
+    const prod = localStorage.getItem('ms_productos');
+    if (prod) setProductos(JSON.parse(prod));
+  }, []);
+
+  // Calcular total automáticamente
+  useEffect(() => {
+    const totalCalculado = seleccionados.reduce((sum, item) => {
+      return sum + (item.venta * item.cantidad);
+    }, 0);
+    setTotal(totalCalculado);
+  }, [seleccionados]);
+
+  const handleAgregar = (prod) => {
+    const yaEsta = seleccionados.find(p => p.codigo === prod.codigo);
+    if (yaEsta) return alert('Este producto ya está en la venta.');
+    setSeleccionados([...seleccionados, { ...prod, cantidad: 1 }]);
+  };
+
+  const handleCantidad = (codigo, cant) => {
+    const actualizados = seleccionados.map(p => {
+      if (p.codigo === codigo) {
+        const nueva = Number(cant);
+        if (nueva > p.stock) {
+          alert('No hay suficiente stock.');
+          return { ...p, cantidad: p.stock };
+        }
+        return { ...p, cantidad: nueva };
+      }
+      return p;
+    });
+    setSeleccionados(actualizados);
+  };
+
+  const confirmarVenta = () => {
+    if (seleccionados.length === 0) return alert('No hay productos en la venta.');
+
+    // 1. Actualizar productos (descontar stock)
+    const nuevosProductos = productos.map(prod => {
+      const vendido = seleccionados.find(s => s.codigo === prod.codigo);
+      if (vendido) {
+        const nuevoStock = prod.stock - vendido.cantidad;
+        return { ...prod, stock: nuevoStock >= 0 ? nuevoStock : 0 };
+      }
+      return prod;
+    });
+
+    // 2. Guardar en localStorage
+    localStorage.setItem('ms_productos', JSON.stringify(nuevosProductos));
+    setProductos(nuevosProductos);
+
+    // 3. Guardar venta
+    const nuevaVenta = {
+      id: Date.now(),
+      fecha: new Date().toLocaleString(),
+      items: seleccionados,
+      total
+    };
+    const nuevasVentas = [...ventas, nuevaVenta];
+    localStorage.setItem('ms_ventas', JSON.stringify(nuevasVentas));
+    setVentas(nuevasVentas);
+
+    // 4. Limpiar venta
+    setSeleccionados([]);
+    setTotal(0);
+    alert('Venta confirmada');
+  };
+
+  const productosFiltrados = productos.filter(p =>
+    p.nombre.toLowerCase().includes(buscar.toLowerCase()) ||
+    p.codigo.toLowerCase().includes(buscar.toLowerCase())
   );
 
-  // Agrega una venta nueva
-  function addVenta() {
-    if (!producto.trim() || !monto) return;
-    const id = ventas.length ? Math.max(...ventas.map(v => v.id)) + 1 : 1;
-    setVentas([
-      ...ventas,
-      { id, producto: producto.trim(), monto: Number(monto) }
-    ]);
-    setProducto('');
-    setMonto('');
-  }
-
-  // Edita el monto de una venta existente
-  function editVenta(id) {
-    const updated = prompt('Ingrese nuevo monto (Gs.):');
-    if (updated != null) {
-      const m = Number(updated);
-      if (!isNaN(m))
-        setVentas(
-          ventas.map(v =>
-            v.id === id ? { ...v, monto: m } : v
-          )
-        );
-    }
-  }
-
-  // Elimina una venta
-  function deleteVenta(id) {
-    if (window.confirm('¿Eliminar esta venta?')) {
-      setVentas(ventas.filter(v => v.id !== id));
-    }
-  }
+  const formatNumber = n => Number(n).toLocaleString('es-ES');
 
   return (
     <div className="p-4">
-      <h1 className="text-xl font-semibold mb-4">Ventas</h1>
+      <h1 className="text-2xl font-bold mb-4">Ventas</h1>
 
-      {/* Formulario */}
-      <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-2">
-        <input
-          type="text"
-          placeholder="Producto"
-          value={producto}
-          onChange={e => setProducto(e.target.value)}
-          className="border px-2 py-1 rounded"
-        />
-        <input
-          type="number"
-          placeholder="Monto (Gs.)"
-          value={monto}
-          onChange={e => setMonto(e.target.value)}
-          className="border px-2 py-1 rounded"
-        />
-        <button
-          onClick={addVenta}
-          className="bg-green-500 text-white px-4 py-1 rounded"
-        >
-          Agregar venta
-        </button>
-      </div>
-
-      {/* Búsqueda */}
-      <SearchBar
-        placeholder="Buscar por ID o producto"
-        value={search}
-        onChange={setSearch}
+      {/* Buscar producto */}
+      <input
+        type="text"
+        value={buscar}
+        onChange={e => setBuscar(e.target.value)}
+        placeholder="Buscar producto por código o nombre"
+        className="border p-2 rounded w-full mb-4"
       />
 
-      {/* Tabla */}
-      <table className="w-full table-auto border-collapse">
-        <thead>
-          <tr className="bg-gray-100">
-            <th className="px-4 py-2 border">ID</th>
-            <th className="px-4 py-2 border">Producto</th>
-            <th className="px-4 py-2 border text-right">Monto (Gs.)</th>
-            <th className="px-4 py-2 border">Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.length > 0 ? (
-            filtered.map(v => (
-              <tr key={v.id} className="hover:bg-gray-50">
-                <td className="px-4 py-2 border">{v.id}</td>
-                <td className="px-4 py-2 border">{v.producto}</td>
-                <td className="px-4 py-2 border text-right">
-                  {formatNumber(v.monto)}
-                </td>
-                <td className="px-4 py-2 border space-x-2">
-                  <button
-                    onClick={() => editVenta(v.id)}
-                    className="text-blue-500"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    onClick={() => deleteVenta(v.id)}
-                    className="text-red-500"
-                  >
-                    Eliminar
-                  </button>
-                </td>
+      {/* Lista de resultados */}
+      <div className="mb-4">
+        {productosFiltrados.map(p => (
+          <div key={p.codigo} className="flex justify-between items-center border p-2 rounded mb-1">
+            <span>{p.nombre} - Talle {p.talle} - Stock: {p.stock}</span>
+            <button onClick={() => handleAgregar(p)} className="bg-blue-500 text-white px-4 py-1 rounded">Agregar</button>
+          </div>
+        ))}
+      </div>
+
+      {/* Productos seleccionados para la venta */}
+      {seleccionados.length > 0 && (
+        <>
+          <h2 className="text-xl font-semibold mb-2">Productos a vender</h2>
+          <table className="min-w-full bg-white shadow rounded mb-4">
+            <thead>
+              <tr>
+                <th className="px-4 py-2">Producto</th>
+                <th className="px-4 py-2">Cantidad</th>
+                <th className="px-4 py-2">Precio</th>
+                <th className="px-4 py-2">Subtotal</th>
               </tr>
-            ))
-          ) : (
-            <tr>
-              <td colSpan="4" className="text-center py-6 text-gray-500">
-                No hay ventas registradas
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+            </thead>
+            <tbody>
+              {seleccionados.map(p => (
+                <tr key={p.codigo}>
+                  <td className="border px-4 py-2">{p.nombre}</td>
+                  <td className="border px-4 py-2">
+                    <input
+                      type="number"
+                      value={p.cantidad}
+                      min={1}
+                      max={p.stock}
+                      onChange={e => handleCantidad(p.codigo, e.target.value)}
+                      className="w-20 border rounded p-1"
+                    />
+                  </td>
+                  <td className="border px-4 py-2">{formatNumber(p.venta)}</td>
+                  <td className="border px-4 py-2">{formatNumber(p.venta * p.cantidad)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="text-right mb-4 font-bold text-lg">
+            Total: {formatNumber(total)} Gs.
+          </div>
+
+          <button onClick={confirmarVenta} className="bg-green-600 text-white px-6 py-2 rounded">Confirmar Venta</button>
+        </>
+      )}
+
+      {/* Historial de ventas */}
+      <div className="mt-8">
+        <h2 className="text-xl font-bold mb-2">Historial de ventas</h2>
+        {ventas.length === 0 ? (
+          <p className="text-gray-500">Aún no hay ventas registradas.</p>
+        ) : (
+          <ul className="space-y-2">
+            {ventas.map(v => (
+              <li key={v.id} className="border p-2 rounded">
+                <div className="font-semibold">{v.fecha}</div>
+                <ul className="ml-4 text-sm">
+                  {v.items.map(item => (
+                    <li key={item.codigo}>
+                      {item.nombre} x{item.cantidad} = {formatNumber(item.venta * item.cantidad)} Gs.
+                    </li>
+                  ))}
+                </ul>
+                <div className="text-right font-bold mt-1">Total: {formatNumber(v.total)} Gs.</div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
-);
+  );
 }
